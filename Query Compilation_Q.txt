@@ -1,0 +1,190 @@
+Q1#1QUERY
+---------
+WITH family_films AS /* table containing all films that are considered family friendly*/
+ (
+  SELECT f.film_id film_id, f.title film_name, c.name category_name
+    FROM category c
+    JOIN film_category fc
+         ON fc.category_id = c.category_id
+            AND name IN('Animation', 'Children', 'Classics', 'Comedy', 'Family', 'Music')
+    JOIN film f
+         ON f.film_id = fc.film_id
+ ) 
+ 
+SELECT ff.film_name film_name, ff.category_name category, count(*) rental_count
+   FROM rental r
+   JOIN inventory i
+        ON i.inventory_id = r.inventory_id
+   JOIN family_films ff
+        ON ff.film_id = i.film_id             
+GROUP BY 1,2
+ORDER BY 2,1
+--------------------------------------------------------------------------
+Q1#2QUERY
+---------
+
+WITH rental_duration_quartiles AS /* table containing films with their assigned quartile base on rental duration*/
+(
+ SELECT f.title title, c.name category, f.rental_duration rental_duration,
+        NTILE(4) OVER ( ORDER BY f.rental_duration) AS standard_quartile
+   FROM category c
+   JOIN film_category fc
+        ON c.category_id = fc.category_id
+           AND c.name in ('Animation', 'Children', 'Classics', 'Comedy', 'Family', 'Music')
+   JOIN film f
+        ON f.film_id = fc.film_id
+)
+ 
+Select title, category, rental_duration, standard_quartile
+  From rental_duration_quartiles 
+ ORDER BY 3
+-------------------------------------------------------------------------- 
+Q1#3QUERY
+---------
+
+WITH rental_duration_quartiles AS /* table containing films with their assigned quartile base on rental duration*/
+(
+ SELECT f.title title, c.name category, f.rental_duration rental_duration,
+        NTILE(4) OVER ( ORDER BY f.rental_duration) AS standard_quartile
+   FROM film f
+   JOIN film_category fc
+        ON f.film_id=fc.film_id
+   JOIN category c
+        ON fc.category_id= c.category_id
+           AND c.name in ('Animation', 'Children', 'Classics', 'Comedy','Family','Music')
+ )
+ 
+SELECT category, standard_quartile, count(*) rental_count
+  FROM rental_duration_quartiles 
+ GROUP BY 1,2
+ ORDER BY 1,2
+ 
+ ------------------------------------------------------------------------------
+ Q2#1QUERY
+---------
+SELECT DATE_PART('year',rental_date)  rent_year, 
+       DATE_PART('month',rental_date) rent_month, 
+       s.store_id store, COUNT(*) rental_count
+  FROM  rental r
+  JOIN staff s
+       ON r.staff_id = s.staff_id
+ GROUP BY 1,2,3
+ ORDER BY 1,2
+
+--------------------------------------------------------------------------
+Q2#2QUERY
+---------
+WITH top_10 AS /*table containing 10 top paying customers in 2007*/
+(
+  SELECT payment_date, customer_id, amount as payment_amount
+    FROM payment
+   WHERE customer_id in 
+   (
+    SELECT customer_id
+      FROM
+      (
+        SELECT customer_id, SUM(amount) total_payment
+          FROM payment
+         WHERE DATE_PART('year', payment_date) = 2007
+         GROUP BY 1
+         ORDER BY 2 DESC
+         LIMIT 10
+      ) temp
+   )
+ )
+
+SELECT DATE_TRUNC('month',t10.payment_date) as date, 
+       c.first_name || ' ' || c.last_name as customer_name,
+       COUNT(*) payment_count, 
+       SUM(t10.payment_amount) monthly_payment
+ FROM top_10 t10
+ JOIN customer c
+      ON t10.customer_id = c.customer_id
+GROUP BY date,customer_name
+ORDER BY customer_name
+
+-------------------------------------------------------------------------- 
+Q2#3QUERY
+---------
+
+WITH top_10 AS /*table containing 10 top paying customers in 2007*/
+(
+  SELECT payment_date, customer_id, amount as payment_amount
+    FROM payment
+   WHERE customer_id in 
+   (
+    SELECT customer_id
+      FROM
+      (
+        SELECT customer_id, SUM(amount) total_payment
+          FROM payment
+         WHERE DATE_PART('year', payment_date) = 2007
+         GROUP BY 1
+         ORDER BY 2 DESC
+         LIMIT 10
+      ) temp
+   )
+ )
+
+SELECT DATE_TRUNC('month', t10.payment_date) as payment_date, 
+       c.customer_id as ID,
+       c.first_name || ' ' || c.last_name as customer_name, 
+       SUM(t10.payment_amount) monthly_payment,
+       COALESCE(SUM(t10.payment_amount) - LAG(SUM(t10.payment_amount)) OVER (PARTITION BY c.customer_id ORDER BY DATE_TRUNC('month',t10.payment_date)),0) monthly_difference
+ FROM top_10 t10
+ JOIN customer c
+      ON t10.customer_id = c.customer_id
+GROUP BY 1,2,3
+ORDER BY 3,2,1
+
+
+part 2 ----> identifies the customer who paid the most difference in terms of payments with list of payments and number of payments every month
+
+
+WITH top_10 AS /*table containing 10 top paying customers in 2007*/
+(
+  SELECT payment_date, customer_id, amount as payment_amount
+    FROM payment
+   WHERE customer_id in 
+   (
+    SELECT customer_id
+      FROM
+      (
+        SELECT customer_id, SUM(amount) total_payment
+          FROM payment
+         WHERE DATE_PART('year', payment_date) = 2007
+         GROUP BY 1
+         ORDER BY 2 DESC
+         LIMIT 10
+      ) temp
+   )
+ ),
+  
+top_10_monthly_differentials AS /*table containing 10 top paying customers in 2007 and their monthly differentials*/
+(
+ SELECT DATE_TRUNC('month',t10.payment_date) as pay_date, 
+        c.customer_id as id,
+        c.first_name || ' ' || c.last_name as customer_name,
+        SUM(t10.payment_amount) monthly_payment,
+        COALESCE(SUM(t10.payment_amount) - LAG(SUM(t10.payment_amount)) OVER ( PARTITION BY c.customer_id ORDER BY DATE_TRUNC('month',t10.payment_date)),0) monthly_difference
+  FROM top_10 t10
+  JOIN customer c
+       ON t10.customer_id = c.customer_id
+ GROUP BY ID,pay_date,customer_name
+ ORDER BY customer_name, pay_date
+)
+
+SELECT pay_date, 
+       customer_name Customer_with_highest_monthly_difference, 
+       monthly_payment, 
+       monthly_difference
+ FROM top_10_monthly_differentials 
+WHERE customer_name = (SELECT customer_name
+                         FROM 
+                            (SELECT * 
+                               FROM top_10_monthly_differentials
+                              ORDER BY monthly_difference desc
+                              LIMIT 1
+                            ) AS temp
+                      )
+ 
